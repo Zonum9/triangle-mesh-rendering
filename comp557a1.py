@@ -13,6 +13,7 @@ parser.add_argument("--px", type=int, default=10, help="Size of pixel in on scre
 parser.add_argument("--test", type=int, help="run a numbered unit test")
 parser.add_argument("--timeStep", type=float, default=0.01, help="time skip between frames (makes animations faster or slower)")
 parser.add_argument("--rotateFalse", action='store_true', help="setting this flag disable the mesh rotation")
+parser.add_argument("--scale", type=int,default=200, help="scale at which the mesh will be rendered")
 
 args = parser.parse_args()
 ti.init(arch=ti.cpu) # can also use ti.gpu
@@ -25,6 +26,7 @@ Depth = np.zeros((width, height, 1), dtype=np.float32)
 pixti = ti.Vector.field(3, dtype=ti.f32, shape=(width, height))
 pixels = ti.Vector.field(3, dtype=ti.f32, shape=(width*px, height*px))
 Vertices, _, Normals, Tris, _, TN = igl.read_obj(args.file) #read mesh with normals
+argsScale=args.scale
 
 def drawToPix(x,y,r=1,g=1,b=1):
     pix[x,y,0]=r
@@ -33,8 +35,7 @@ def drawToPix(x,y,r=1,g=1,b=1):
 
 def project(Point3D):   
     x,y,_=Point3D
-    #clip to fit in the buffer
-    return np.clip([x,y],[0,0],[width-1,height-1]).astype(int)
+    return x,y
 
 #method used to render without scale matrix transformation
 def projectAndScale(Point3D,scale): 
@@ -46,11 +47,11 @@ def projectAndScale(Point3D,scale):
     originY=height/2
     worldX=originX+u*scale
     worldY=originY+v*scale
-    #clip to fit in the buffer
-    return np.clip([worldX,worldY],[0,0],[width-1,height-1]).astype(int)
+    return worldX,worldY
 
 
-def drawTri(triangle,normal,rotateDisabled,scale=800):
+def drawTri(triangle,normal,rotateDisabled,scale):
+    scale/=px
     vertices3D=np.zeros((3,3))
     normalPoints=np.zeros((3,3))
     if rotateDisabled:
@@ -69,12 +70,11 @@ def drawTri(triangle,normal,rotateDisabled,scale=800):
         p1=project(vertices3D[0])
         p2=project(vertices3D[1])
         p3=project(vertices3D[2]) 
-
-    #these values have already been clipped to be within the buffer 
-    boundingBoxMinX= min(p1[0],p2[0],p3[0])
-    boundingBoxMinY= min(p1[1],p2[1],p3[1])
-    boundingBoxMaxX= max(p1[0],p2[0],p3[0])
-    boundingBoxMaxY= max(p1[1],p2[1],p3[1])
+    
+    boundingBoxMinX= np.clip(np.floor(min(p1[0],p2[0],p3[0])),0,width).astype(int)
+    boundingBoxMinY= np.clip(np.floor(min(p1[1],p2[1],p3[1])),0,height).astype(int)
+    boundingBoxMaxX= np.clip(np.ceil(max(p1[0],p2[0],p3[0])),0,width).astype(int)
+    boundingBoxMaxY= np.clip(np.ceil(max(p1[1],p2[1],p3[1])),0,height).astype(int)
     
 
     if args.test == 1:
@@ -98,69 +98,15 @@ def drawTri(triangle,normal,rotateDisabled,scale=800):
             for y in range(boundingBoxMinY,boundingBoxMaxY):
                 alpha,beta,gamma=cartesianToBary([x,y],[p1,p2,p3])
                 if alpha>=0 and beta>=0 and gamma>=0:
-                    z = alpha*normalPoints[0][2]+beta*normalPoints[1][2]+gamma*normalPoints[2][2]
+                    z = alpha*vertices3D[0][2]+beta*vertices3D[1][2]+gamma*vertices3D[2][2]                    
                     if(Depth[x,y] < z):
                         Depth[x,y]=z
-                        if z >= 0:
-                            drawToPix(x,y,z,z,z)
+                        normalZ = alpha*normalPoints[0][2]+beta*normalPoints[1][2]+gamma*normalPoints[2][2]
+                        if normalZ >= 0:
+                            drawToPix(x,y,normalZ,normalZ,normalZ)
                         else:
                             drawToPix(x,y,0,0,0)
-        # drawLine(p1,p2)
-        # drawLine(p2,p3)
-        # drawLine(p3,p1)
-    
-
-
-#todo this was taken form wikipedia, try to understand it later
-def drawLine(p1,p2):
-    x0,y0=p1
-    x1,y1=p2
-    #lines with shallow slope
-    if abs(y1-y0)<abs(x1-x0):
-        if x0>x1:
-            plotLineLow(x1,y1,x0,y0)
-        else:
-            plotLineLow(x0,y0,x1,y1)
-    #lines with steep slope
-    else:
-        if y0>y1:
-            plotLineHigh(x1,y1,x0,y0)
-        else:
-            plotLineHigh(x0,y0,x1,y1)
-
-def plotLineLow(x0,y0,x1,y1):
-    dx=x1-x0
-    dy=y1-y0
-    yi=1
-    if dy<0:
-        yi=-1
-        dy=-dy
-    D=(2*dy)-dx
-    y=y0
-    for x in range(x0,x1):
-        drawToPix(x,y)
-        if D>0:
-            y=y+yi
-            D=D+(2*(dy-dx))
-        else:
-            D=D+2*dy
-
-def plotLineHigh(x0,y0,x1,y1):
-    dx=x1-x0
-    dy=y1-y0
-    xi=1
-    if dx<0:
-        xi=-1
-        dx=-dx
-    D=(2*dx)-dy
-    x=x0
-    for y in range(y0,y1):
-        drawToPix(x,y)
-        if D>0:
-            x=x+xi
-            D=D+(2*(dx-dy))
-        else:
-            D=D+2*dx
+                                                  
 def cartesianToBary(point2D,triangleVertices):
     a, b, c = triangleVertices    
     xa,ya=a
@@ -176,13 +122,19 @@ def cartesianToBary(point2D,triangleVertices):
     gamma=1-alpha-beta    
     return alpha, beta, gamma
 
-def triangleNormal(triangleVertices3D):
+
+
+def triangleNormal(triangle,faceIndex,Normals):
+    triangleVertices3D= np.zeros((3,3))
+    for i,vIndex in enumerate(triangle):
+        triangleVertices3D[i]=Vertices[vIndex]
     a,b,c =triangleVertices3D
-    a=np.array(a)
-    b=np.array(b)
-    c=np.array(c)
-    n = np.cross(np.subtract(b,a),np.subtract(c,a))
+    n = np.cross(b-a,c-a)
+    n = n/np.linalg.norm(n)
     return n
+
+    
+
 
 
 @ti.kernel
@@ -195,7 +147,17 @@ def copy_pixels():
 gui = ti.GUI("Rasterizer", res=(width*px, height*px))
 t = 0 # time step for time varying transformaitons
 translate = np.array([ width/2,height/2,0 ]) # translate to center of window
-scale = 200/px*np.eye(3) # scale to fit in the window
+scale = argsScale/px*np.eye(3) # scale to fit in the window
+
+if Normals.shape[0]==0:
+    Normals= np.empty(shape=(0,3))
+    TN = np.zeros(Tris.shape).astype(int)
+    for faceIndex,triangle in enumerate(Tris):        
+        n=triangleNormal(triangle,faceIndex,Normals)    
+        Normals=np.append(Normals,[n],axis=0)
+        for i in range(3):
+            TN[faceIndex,i]=len(Normals)-1
+
 while gui.running:
     pix.fill(0) # clear pixel buffer
     Depth.fill(-math.inf) # clear depth buffer    
@@ -210,10 +172,8 @@ while gui.running:
     VerticesTransformed = VerticesTransformed + translate
     NormalsTransformed = (Rotation_y @ Rotation_x @ Rotation_z @ Normals.T).T
 
-    # print(TN)
-    # print('----------------------')
     for triangle,normal in zip(Tris,TN):
-        drawTri(triangle,normal,RotateFalse)
+        drawTri(triangle,normal,RotateFalse,argsScale)
     # draw!
     pixti.from_numpy(pix)
     copy_pixels()
