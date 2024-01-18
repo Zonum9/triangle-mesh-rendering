@@ -1,3 +1,5 @@
+
+# todo add the thigns at the top
 import math
 import igl
 import numpy as np
@@ -14,6 +16,7 @@ parser.add_argument("--test", type=int, help="run a numbered unit test")
 parser.add_argument("--timeStep", type=float, default=0.01, help="time skip between frames (makes animations faster or slower)")
 parser.add_argument("--rotateFalse", action='store_true', help="setting this flag disable the mesh rotation")
 parser.add_argument("--scale", type=int,default=200, help="scale at which the mesh will be rendered")
+parser.add_argument("--nonSmoothNormals", action='store_true', help="setting this will make the model look low poly")
 
 args = parser.parse_args()
 ti.init(arch=ti.cpu) # can also use ti.gpu
@@ -40,16 +43,13 @@ def project(Point3D):
 #method used to render without scale matrix transformation
 def projectAndScale(Point3D,scale): 
     x,y,z=Point3D
-    z=1 #note this makes it orthographic, but can change if necessary
-    u=x/z
-    v=y/z  
     originX= width/2
     originY=height/2
-    worldX=originX+u*scale
-    worldY=originY+v*scale
+    worldX=originX+x*scale
+    worldY=originY+y*scale
     return worldX,worldY
 
-
+#lots of repeated code, but wanted to avoid having if conditions inside of the for loops
 def drawTri(triangle,normal,rotateDisabled,scale):
     scale/=px
     vertices3D=np.zeros((3,3))
@@ -106,14 +106,14 @@ def drawTri(triangle,normal,rotateDisabled,scale):
                             drawToPix(x,y,normalZ,normalZ,normalZ)
                         else:
                             drawToPix(x,y,0,0,0)
-                                                  
+
+#transforms 2d point into bary cords for a give triangle                                           
 def cartesianToBary(point2D,triangleVertices):
     a, b, c = triangleVertices    
     xa,ya=a
     xb,yb=b
     xc,yc=c
     x, y = point2D        
-    # Calculate the barycentric coordinates
     triangleArea = (yb-yc)*(xa-xc)+(xc-xb)*(ya-yc)    
     if triangleArea==0:
         return 0,0,0
@@ -122,15 +122,13 @@ def cartesianToBary(point2D,triangleVertices):
     gamma=1-alpha-beta    
     return alpha, beta, gamma
 
-
-
-def triangleNormal(triangle,faceIndex,Normals):
+#retunrs non normalized normals
+def triangleNormal(triangle):
     triangleVertices3D= np.zeros((3,3))
     for i,vIndex in enumerate(triangle):
         triangleVertices3D[i]=Vertices[vIndex]
     a,b,c =triangleVertices3D
     n = np.cross(b-a,c-a)
-    n = n/np.linalg.norm(n)
     return n
 
     
@@ -149,14 +147,25 @@ t = 0 # time step for time varying transformaitons
 translate = np.array([ width/2,height/2,0 ]) # translate to center of window
 scale = argsScale/px*np.eye(3) # scale to fit in the window
 
-if Normals.shape[0]==0:
+if args.nonSmoothNormals:
     Normals= np.empty(shape=(0,3))
     TN = np.zeros(Tris.shape).astype(int)
     for faceIndex,triangle in enumerate(Tris):        
-        n=triangleNormal(triangle,faceIndex,Normals)    
-        Normals=np.append(Normals,[n],axis=0)
+        n=triangleNormal(triangle)    
+        Normals=np.append(Normals,[n/np.linalg.norm(n)],axis=0)
         for i in range(3):
             TN[faceIndex,i]=len(Normals)-1
+
+elif Normals.shape[0]==0:
+    Normals= np.zeros((len(Vertices),3))
+    TN = np.zeros(Tris.shape).astype(int)
+    for faceIndex,triangle in enumerate(Tris):        
+        n=triangleNormal(triangle)    
+        for i,vertexIndex in enumerate(triangle):
+            Normals[vertexIndex]+=n
+            TN[faceIndex,i]=vertexIndex
+    for i,n in enumerate(Normals):
+        Normals[i]=n/np.linalg.norm(n)
 
 while gui.running:
     pix.fill(0) # clear pixel buffer
