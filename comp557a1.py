@@ -13,7 +13,7 @@ parser.add_argument("--width", type=int, default=1440, help="Width of off screen
 parser.add_argument("--height", type=int, default=720, help="Height of off screen framebuffer")
 parser.add_argument("--px", type=int, default=10, help="Size of pixel in on screen framebuffer")
 parser.add_argument("--test", type=int, help="run a numbered unit test")
-parser.add_argument("--timeStep", type=float, default=0.01, help="time skip between frames (makes animations faster or slower)")
+parser.add_argument("--timeStep", type=float, default=0.001, help="time skip between frames (makes animations faster or slower)")
 parser.add_argument("--rotateFalse", action='store_true', help="setting this flag disable the mesh rotation")
 parser.add_argument("--scale", type=int,default=200, help="scale at which the mesh will be rendered")
 parser.add_argument("--nonSmoothNormals", action='store_true', help="setting this will make the model look low poly")
@@ -50,7 +50,7 @@ def projectAndScale(Point3D,scale):
     return worldX,worldY
 
 #lots of repeated code, but wanted to avoid having if conditions inside of the for loops
-def drawTri(triangle,normal,rotateDisabled,scale):
+def drawTri(triangle,normal,rotateDisabled,scale,faceIndex):
     scale/=px
     vertices3D=np.zeros((3,3))
     normalPoints=np.zeros((3,3))
@@ -78,6 +78,7 @@ def drawTri(triangle,normal,rotateDisabled,scale):
     
 
     if args.test == 1:
+        random.seed(faceIndex);
         r=random.rand()
         g=random.rand()
         b=random.rand()
@@ -181,8 +182,8 @@ while gui.running:
     VerticesTransformed = VerticesTransformed + translate
     NormalsTransformed = (Rotation_y @ Rotation_x @ Rotation_z @ Normals.T).T
 
-    for triangle,normal in zip(Tris,TN):
-        drawTri(triangle,normal,RotateFalse,argsScale)
+    for faceIndex,(triangle,normal) in enumerate(zip(Tris,TN)):
+        drawTri(triangle,normal,RotateFalse,argsScale,faceIndex)
     # draw!
     pixti.from_numpy(pix)
     copy_pixels()
